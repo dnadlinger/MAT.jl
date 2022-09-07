@@ -300,6 +300,29 @@ toarray(x::Bool) = UInt8[x]
 toarray(x) = [x]
 
 # Write the MATLAB type string for dset
+function m_writetypeattrstring(d, typename)
+    dtype = datatype(typename)
+    try
+        HDF5.API.h5t_set_cset(dtype.id, HDF5.API.H5T_CSET_ASCII)
+        dspace = dataspace(typename)
+        attr = try
+            create_attribute(d, name_type_attr_matlab, dtype, dspace)
+        finally
+            close(dspace)
+        end
+        try
+            write_attribute(attr, dtype, typename)
+        catch exc
+            delete_attribute(d, name_type_attr_matlab)
+            rethrow(exc)
+        finally
+            close(attr)
+        end
+    finally
+        close(dtype)
+    end
+    nothing
+end
 m_writetypeattr(dset, ::Type{Complex{T}}) where T = m_writetypeattr(dset, T)
 function m_writetypeattr(dset, T)
     if !haskey(type2str_matlab, T)
@@ -308,7 +331,7 @@ function m_writetypeattr(dset, T)
     typename = type2str_matlab[T]
 
     # Write the attribute
-    write_attribute(dset, name_type_attr_matlab, typename)
+    m_writetypeattrstring(dset, typename)
     if T == Bool
         write_attribute(dset, int_decode_attr_matlab, Int32(1))
     end
@@ -413,7 +436,7 @@ function m_write(mfile::MatlabHDF5File, parent::HDF5Parent, name::String, str::A
         # Create the dataset
         dset, dtype = create_dataset(parent, name, data)
         try
-            write_attribute(dset, name_type_attr_matlab, "char")
+            m_writetypeattrstring(dset, "char")
             write_attribute(dset, empty_attr_matlab, 0x01)
             write_dataset(dset, dtype, data)
         finally
@@ -432,7 +455,7 @@ function m_write(mfile::MatlabHDF5File, parent::HDF5Parent, name::String, str::A
         # Create the dataset
         dset, dtype = create_dataset(parent, name, data)
         try
-            write_attribute(dset, name_type_attr_matlab, "char")
+            m_writetypeattrstring(dset, "char")
             write_attribute(dset, int_decode_attr_matlab, Int32(2))
             write_dataset(dset, dtype, data)
         finally
@@ -460,7 +483,7 @@ function m_write(mfile::MatlabHDF5File, parent::HDF5Parent, name::String, data::
             eset, etype = create_dataset(g, "a", edata)
             try
                 write_dataset(eset, etype, edata)
-                write_attribute(eset, name_type_attr_matlab, "canonical empty")
+                m_writetypeattrstring(eset, "canonical empty")
                 write_attribute(eset, "MATLAB_empty", 0x00)
             finally
                 close(etype)
@@ -491,7 +514,7 @@ function m_write(mfile::MatlabHDF5File, parent::HDF5Parent, name::String, data::
     cset, ctype = create_dataset(parent, name, refs)
     try
         write_dataset(cset, ctype, refs)
-        write_attribute(cset, name_type_attr_matlab, "cell")
+        m_writetypeattrstring(cset, "cell")
     finally
         close(ctype)
         close(cset)
@@ -515,7 +538,7 @@ end
 # Write a struct from arrays of keys and values
 function m_write(mfile::MatlabHDF5File, parent::HDF5Parent, name::String, k::Vector{String}, v::Vector)
     g = create_group(parent, name)
-    write_attribute(g, name_type_attr_matlab, "struct")
+    m_writetypeattrstring(g, "struct")
     for i = 1:length(k)
         m_write(mfile, g, k[i], v[i])
     end
